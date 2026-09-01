@@ -28,6 +28,18 @@ class TestRender(unittest.TestCase):
         self.assertIn("[3] C", out)
         self.assertIn("- **[社会]** Fourth event [3]", out)
 
+    def test_degradation_transparency(self):
+        items = [BriefItem(headline="LLM item", summary="S.", impact="",
+                           citation_ids=[1], mode="openai-compat"),
+                 BriefItem(headline="Rule item", summary="S.", impact="",
+                           citation_ids=[1], mode="rule")]
+        arts = {1: {"id": 1, "title": "A", "url": "https://a.com/1", "source_id": "s"}}
+        out = render_daily("2026-09-01", items, arts, {"s": "S"},
+                           {"backend": "openai-compat", "llm_count": 1,
+                            "item_count": 2, "articles": 2, "events": 2, "sources": 1})
+        self.assertIn("模式：openai-compat（LLM 分析 1/2，规则降级 1）", out)
+        self.assertIn("⚠️ 规则降级", out)
+
 
 if __name__ == "__main__":
     unittest.main()

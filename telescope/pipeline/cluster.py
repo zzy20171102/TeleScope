@@ -1,4 +1,14 @@
-"""Online greedy event clustering (entity/title Jaccard within time window)."""
+"""Online greedy event clustering with anti-drift scoring (P0/T1.2).
+
+v0.2 anti-drift rules:
+- lexical: title/body token jaccard >= strong_tok merges directly;
+- entity: jaccard >= strong_ent AND >= 2 shared entities (blocks two
+  different stories that merely share one country, keeps cross-lingual
+  same-event merging alive);
+- combined: ent >= 0.5 and tok >= 0.15 (weak but corroborated signal).
+Matching uses both the event's SEED (first article) and accumulated
+representation to resist cluster drift.
+"""
 from __future__ import annotations
 
 import datetime as dt
@@ -22,10 +32,24 @@ def _parse_ts(s: str) -> dt.datetime:
 
 
 class OnlineClusterer:
-    def __init__(self, window_hours: int = 72, threshold: float = 0.30) -> None:
+    def __init__(self, window_hours: int = 72,
+                 strong_tok: float = 0.35, strong_ent: float = 0.67) -> None:
         self.window = dt.timedelta(hours=window_hours)
-        self.threshold = threshold
+        self.strong_tok = strong_tok
+        self.strong_ent = strong_ent
         self.events: list[dict[str, Any]] = []
+
+    def _score(self, ents: set[str], toks: set[str], ev: dict[str, Any]) -> float:
+        ent_j = max(jaccard(ents, ev["seed_ents"]), jaccard(ents, ev["ents"]))
+        tok_j = max(jaccard(toks, ev["seed_toks"]), jaccard(toks, ev["toks"]))
+        shared_ents = max(len(ents & ev["seed_ents"]), len(ents & ev["ents"]))
+        if tok_j >= self.strong_tok:
+            return tok_j
+        if ent_j >= self.strong_ent and shared_ents >= 2:
+            return ent_j
+        if ent_j >= 0.5 and tok_j >= 0.15:
+            return 0.5 * ent_j + 0.5 * tok_j
+        return 0.0
 
     def add(self, art: Article) -> int:
         ents = set(art.entities)
@@ -37,10 +61,10 @@ class OnlineClusterer:
             age = ts - ev["last_ts"]
             if age > self.window or age < -self.window:
                 continue
-            s = max(jaccard(ents, ev["ents"]), jaccard(toks, ev["toks"]))
+            s = self._score(ents, toks, ev)
             if s > best_s:
                 best_s, best = s, ev
-        if best is not None and best_s >= self.threshold:
+        if best is not None and best_s >= 0.30:
             best["article_ids"].append(art.id)
             best["source_ids"].append(art.source_id)
             best["ents"] |= ents
@@ -57,6 +81,8 @@ class OnlineClusterer:
             "source_ids": [art.source_id],
             "ents": set(ents),
             "toks": set(toks),
+            "seed_ents": set(ents),
+            "seed_toks": set(toks),
             "first_ts": ts,
             "last_ts": ts,
         }

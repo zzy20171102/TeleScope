@@ -1,4 +1,7 @@
-"""Daily brief Markdown rendering with citation anchors [n]."""
+"""Daily brief Markdown rendering with citation anchors [n].
+
+P0/T1.3: header shows LLM/rule ratio; items degraded to rule mode are marked.
+"""
 from __future__ import annotations
 
 from typing import Any
@@ -32,12 +35,19 @@ def render_daily(date: str, items: list[BriefItem],
             if cid in articles_by_id:
                 reg(cid)
 
+    backend = str(meta.get("backend", "rule"))
+    degraded = backend != "rule"
+
     lines: list[str] = []
     lines.append(f"# TeleScope 每日国际新闻简报 · {date}")
     lines.append("")
-    lines.append(f"> 生成时间：{meta.get('generated_at', '')} ｜ 模式：{meta.get('backend', 'rule')} ｜ "
-                 f"文章：{meta.get('articles', 0)} ｜ 事件：{meta.get('events', 0)} ｜ "
-                 f"来源：{meta.get('sources', 0)} 家")
+    header = (f"> 生成时间：{meta.get('generated_at', '')} ｜ 模式：{backend}")
+    if degraded:
+        header += (f"（LLM 分析 {meta.get('llm_count', 0)}/{meta.get('item_count', len(items))}，"
+                   f"规则降级 {len(items) - int(meta.get('llm_count', 0))}）")
+    header += (f" ｜ 文章：{meta.get('articles', 0)} ｜ 事件：{meta.get('events', 0)} ｜ "
+               f"来源：{meta.get('sources', 0)} 家")
+    lines.append(header)
     lines.append("")
     top = items[:3]
     rest = items[3:]
@@ -47,9 +57,10 @@ def render_daily(date: str, items: list[BriefItem],
         for i, it in enumerate(top, 1):
             lines.append(f"### {i}. {it.headline} {_anchors(it.citation_ids, index)}")
             lines.append("")
+            flag = " ｜ ⚠️ 规则降级" if (degraded and it.mode == "rule") else ""
             lines.append(f"- **分类**：{TOPIC_ZH.get(it.topic, it.topic)} ｜ "
                          f"**严重度**：{it.severity:.1f} ｜ **热度**：{it.score:.2f} ｜ "
-                         f"**报道源**：{it.source_count} 家")
+                         f"**报道源**：{it.source_count} 家{flag}")
             for para in (it.summary or "").split("\n"):
                 if para.strip():
                     lines.append(f"- {para.strip()}")
@@ -60,8 +71,9 @@ def render_daily(date: str, items: list[BriefItem],
         lines.append("## 分类速览")
         lines.append("")
         for it in rest:
+            flag = " ⚠️" if (degraded and it.mode == "rule") else ""
             lines.append(f"- **[{TOPIC_ZH.get(it.topic, it.topic)}]** {it.headline} "
-                         f"{_anchors(it.citation_ids, index)}（{it.source_count} 源）")
+                         f"{_anchors(it.citation_ids, index)}（{it.source_count} 源）{flag}")
         lines.append("")
     lines.append("## 引用来源")
     lines.append("")

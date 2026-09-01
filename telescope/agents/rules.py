@@ -2,61 +2,93 @@
 
 Used as the default backend and as automatic fallback when LLM calls fail
 (Factor 9: errors compacted to error_card, pipeline continues).
+
+v0.2 hardening (P0/T1.1):
+- ASCII keywords match with word boundaries + plural/verb suffixes
+  (no more substring hits like "war" inside "ward"/"warning");
+- topic/severity require strong signal: a title hit OR >=2 distinct keyword
+  hits in body (single weak hit in long aggregated text no longer qualifies);
+- topic and severity rule groups evaluated independently.
 """
 from __future__ import annotations
 
 import re
 from typing import Any
 
+
+def _compile(kws: list[str]) -> list[re.Pattern[str]]:
+    pats: list[re.Pattern[str]] = []
+    for kw in kws:
+        kw = kw.strip()
+        if not kw:
+            continue
+        if kw.isascii():
+            pats.append(re.compile(r"\b" + re.escape(kw) + r"(?:s|es|ed|ing)?\b",
+                                   re.IGNORECASE))
+        else:
+            pats.append(re.compile(re.escape(kw)))
+    return pats
+
+
 # priority-ordered topic rules (first match wins)
 TOPIC_RULES: list[tuple[str, list[str]]] = [
     ("military", ["war", "missile", "airstrike", "air strike", "troops", "military",
-                  "attack", "drone", "nuclear", "军队", "战争", "导弹", "空袭", "袭击",
-                  "军演", "部队", "核武", "无人机", "军方"]),
-    ("diplomacy", ["summit", "talks", "sanction", "ambassador", "treaty", "diplomat",
-                   "foreign minister", "会谈", "峰会", "制裁", "大使", "外交", "外长",
-                   "访问", "协议", "断交"]),
-    ("economy", ["economy", "trade", "tariff", "market", "inflation", "oil", "energy",
-                 "chip", "semiconductor", "export", "import", "gdp", "central bank",
-                 "经济", "贸易", "关税", "市场", "通胀", "石油", "能源", "芯片",
-                 "半导体", "出口", "进口", "央行"]),
-    ("tech", ["ai ", "artificial intelligence", "technology", "satellite", "cyber",
+                  "attack", "drone strike", "nuclear", "军队", "战争", "导弹", "空袭",
+                  "袭击", "军演", "部队", "核武", "无人机", "军方"]),
+    ("diplomacy", ["summit", "diplomatic talks", "sanction", "ambassador", "treaty",
+                   "diplomat", "foreign minister", "会谈", "峰会", "制裁", "大使",
+                   "外交", "外长", "访问", "协议", "断交"]),
+    ("economy", ["economy", "trade", "tariff", "market", "inflation", "oil price",
+                 "energy", "chip", "semiconductor", "export", "import", "gdp",
+                 "central bank", "经济", "贸易", "关税", "市场", "通胀", "石油",
+                 "能源", "芯片", "半导体", "出口", "进口", "央行"]),
+    ("tech", ["artificial intelligence", "technology", "satellite", "cyber",
               "quantum", "人工智能", "科技", "卫星", "网络攻击", "量子"]),
     ("politics", ["election", "president", "parliament", "government", "protest",
                   "prime minister", "coup", "选举", "总统", "议会", "政府", "抗议",
                   "总理", "政变", "执政"]),
-    ("society", ["school", "health", "climate", "earthquake", "flood", "wildfire",
-                 "migrant", "学校", "健康", "气候", "地震", "洪水", "山火", "移民"]),
+    ("society", ["earthquake", "flood", "wildfire", "epidemic", "migrant crisis",
+                 "学校", "健康", "气候", "地震", "洪水", "山火", "移民潮"]),
 ]
 
 SEVERITY_RULES: list[tuple[list[str], float]] = [
     (["war", "invade", "missile strike", "nuclear", "coup", "killed", "dead",
       "战争", "入侵", "导弹袭击", "核", "政变", "遇难", "身亡"], 1.8),
-    (["sanction", "emergency", "resign", "air strike", "attack", "export ban",
-      "制裁", "紧急状态", "辞职", "空袭", "袭击", "出口管制"], 1.4),
-    (["summit", "election", "tariff", "protest", "talks",
-      "峰会", "选举", "关税", "抗议", "会谈"], 1.15),
+    (["sanction", "state of emergency", "resign", "air strike", "attack",
+      "export control", "制裁", "紧急状态", "辞职", "空袭", "袭击", "出口管制"], 1.4),
+    (["summit", "election", "tariff", "protest", "trade deal",
+      "峰会", "选举", "关税", "抗议", "贸易协议"], 1.15),
 ]
 
+_TOPIC_COMPILED = [(t, _compile(kws)) for t, kws in TOPIC_RULES]
+_SEVERITY_COMPILED = [(_compile(kws), bump) for kws, bump in SEVERITY_RULES]
 
-def _text_of(cards: list[dict[str, Any]]) -> str:
-    parts = []
-    for c in cards:
-        parts.append(str(c.get("title", "")))
-        parts.append(str(c.get("text", ""))[:600])
-    return " ".join(parts).lower()
+
+def _hits(text: str, pats: list[re.Pattern[str]]) -> int:
+    return sum(1 for p in pats if p.search(text))
+
+
+def _strong(title: str, body: str, pats: list[re.Pattern[str]]) -> bool:
+    """Title hit OR >=2 distinct keyword hits in body."""
+    return _hits(title, pats) >= 1 or _hits(body, pats) >= 2
+
+
+def _text_of(cards: list[dict[str, Any]]) -> tuple[str, str]:
+    title = " ".join(str(c.get("title", "")) for c in cards)
+    body = " ".join(str(c.get("text", ""))[:1200] for c in cards)
+    return title, body
 
 
 def screen_rule(cards: list[dict[str, Any]]) -> dict[str, Any]:
-    text = _text_of(cards)
+    title, body = _text_of(cards)
     topic = "other"
-    for t, kws in TOPIC_RULES:
-        if any(kw in text for kw in kws):
+    for t, pats in _TOPIC_COMPILED:
+        if _strong(title, body, pats):
             topic = t
             break
     severity = 1.0
-    for kws, bump in SEVERITY_RULES:
-        if any(kw in text for kw in kws):
+    for pats, bump in _SEVERITY_COMPILED:
+        if _strong(title, body, pats):
             severity = bump
             break
     relevant = topic != "other"

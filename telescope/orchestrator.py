@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 
 from . import storage
 from .agents.llm import get_backend
@@ -51,6 +51,19 @@ def collect_all(sources, fetch_fn: Callable[[str], bytes] = rss.fetch_url,
             if on_error:
                 on_error(src.id, e)
     return arts, errors
+
+
+def _card_text(card_arts: list[Article],
+               source_weights: dict[str, float]) -> str:
+    """Top-2 weighted article leads + capped list of remaining titles."""
+    ranked = sorted(card_arts,
+                    key=lambda a: source_weights.get(a.source_id, 1.0),
+                    reverse=True)
+    leads = " ".join(f"{a.title}. {(a.content_text or '')[:400]}".strip()
+                     for a in ranked[:2])
+    other_titles = " ; ".join(a.title for a in ranked[2:12])
+    text = leads if not other_titles else f"{leads} || 其他报道标题: {other_titles}"
+    return text[:1600]
 
 
 def run_daily(hours: int = 24, top_n: int = 6,
@@ -101,21 +114,21 @@ def run_daily(hours: int = 24, top_n: int = 6,
     if not window_arts:
         window_arts = stored
 
-    # 4. cluster into events
+    # 4. cluster into events (anti-drift v0.2)
     clusterer = OnlineClusterer()
     for a in sorted(window_arts, key=lambda x: x.published_at):
         clusterer.add(a)
     events = clusterer.to_events()
 
-    # 5. screen (per event, rule/LLM) and attach topic/severity
+    # 5. screen: cards built from focused top-2 leads
     screener = Screener(backend)
     arts_by_id = {a.id: a for a in window_arts}
     cards = []
     for i, ev in enumerate(events, 1):
         ev.id = i
         card_arts = [arts_by_id[aid] for aid in ev.article_ids if aid in arts_by_id]
-        text = " ".join(f"{a.title}. {a.content_text[:300]}" for a in card_arts)
-        cards.append({"id": i, "title": ev.title, "text": text,
+        cards.append({"id": i, "title": ev.title,
+                      "text": _card_text(card_arts, source_weights),
                       "article_ids": ev.article_ids})
     screen_results = {r.id: r for r in screener.screen(cards)}
     for ev in events:
@@ -128,7 +141,7 @@ def run_daily(hours: int = 24, top_n: int = 6,
               if screen_results.get(e.id) is None or screen_results[e.id].relevant]
     events.sort(key=lambda e: e.score, reverse=True)
 
-    # 6. summarize top events
+    # 6. summarize top events; track backend mode per item
     summarizer = Summarizer(backend)
     items = []
     for ev in events[:top_n]:
@@ -144,15 +157,23 @@ def run_daily(hours: int = 24, top_n: int = 6,
         )
         items.append(item)
         storage.save_event(conn, ev)
+        if backend.name != "rule" and item.mode == "rule":
+            card = "fallback:rule"
+            if summarizer.last_error:
+                card = f"fallback:rule | {summarizer.last_error}"
+            storage.record_step(conn, run_id, "summarizer", f"event:{ev.id}",
+                                error_card=card[:250])
 
     # 7. render + publish
     articles_by_id = {
         a.id: {"id": a.id, "title": a.title, "url": a.url, "source_id": a.source_id}
         for a in window_arts
     }
+    llm_count = sum(1 for it in items if it.mode == backend.name and backend.name != "rule")
     meta = {"generated_at": now.isoformat(timespec="seconds"),
             "backend": backend.name, "articles": len(window_arts),
-            "events": len(events), "sources": len({a.source_id for a in window_arts})}
+            "events": len(events), "sources": len({a.source_id for a in window_arts}),
+            "llm_count": llm_count, "item_count": len(items)}
     body = render_daily(date, items, articles_by_id, source_names, meta)
     out_path = brief_dir / f"{date}.md"
     out_path.write_text(body, encoding="utf-8")
@@ -160,6 +181,7 @@ def run_daily(hours: int = 24, top_n: int = 6,
     storage.finish_run(conn, run_id, "done", {
         "fetched": len(raw), "stored": len(stored), "duplicates": dup_count,
         "events": len(events), "brief": str(out_path), "errors": len(errors),
+        "llm_items": llm_count, "total_items": len(items),
     })
     conn.close()
     return out_path

@@ -89,6 +89,7 @@ class BriefItem:
     severity: float = 1.0
     score: float = 0.0
     source_count: int = 1
+    mode: str = ""  # which backend produced this item: "rule" / "openai-compat"
 
 
 def to_dict(obj: Any) -> dict[str, Any]:
