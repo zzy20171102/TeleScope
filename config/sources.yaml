@@ -1,0 +1,205 @@
+# TeleScope 新闻源配置（单一事实来源）
+# 字段: id/name/url/type/language/region/perspective/weight/fetch_interval_minutes/enabled
+# perspective 说明: wire=通讯社 state-media=国家媒体(线索用,权重调低) 多极视角显式标注
+
+sources:
+  - id: bbc-world
+    name: BBC World
+    url: https://feeds.bbci.co.uk/news/world/rss.xml
+    type: rss
+    language: en
+    region: global
+    perspective: western-mainstream
+    weight: 1.0
+    fetch_interval_minutes: 30
+    enabled: true
+  - id: bbc-tech
+    name: BBC Technology
+    url: https://feeds.bbci.co.uk/news/technology/rss.xml
+    type: rss
+    language: en
+    region: global
+    perspective: western-mainstream
+    weight: 0.8
+    fetch_interval_minutes: 60
+    enabled: true
+  - id: guardian-world
+    name: The Guardian World
+    url: https://www.theguardian.com/world/rss
+    type: rss
+    language: en
+    region: global
+    perspective: western-mainstream
+    weight: 0.95
+    fetch_interval_minutes: 30
+    enabled: true
+  - id: guardian-politics
+    name: The Guardian Politics
+    url: https://www.theguardian.com/politics/rss
+    type: rss
+    language: en
+    region: europe
+    perspective: western-mainstream
+    weight: 0.85
+    fetch_interval_minutes: 60
+    enabled: true
+  - id: nyt-world
+    name: New York Times World
+    url: https://rss.nytimes.com/services/xml/rss/nyt/World.xml
+    type: rss
+    language: en
+    region: americas
+    perspective: western-mainstream
+    weight: 0.95
+    fetch_interval_minutes: 30
+    enabled: true
+  - id: aljazeera-all
+    name: Al Jazeera
+    url: https://www.aljazeera.com/xml/rss/all.xml
+    type: rss
+    language: en
+    region: middle-east
+    perspective: middle-east-perspective
+    weight: 0.9
+    fetch_interval_minutes: 30
+    enabled: true
+  - id: dw-en-world
+    name: DW English World
+    url: https://rss.dw.com/rdf/rss-en-world
+    type: rss
+    language: en
+    region: europe
+    perspective: european-perspective
+    weight: 0.85
+    fetch_interval_minutes: 60
+    enabled: true
+  - id: france24-en
+    name: France 24 English
+    url: https://www.france24.com/en/rss
+    type: rss
+    language: en
+    region: europe
+    perspective: european-perspective
+    weight: 0.85
+    fetch_interval_minutes: 60
+    enabled: true
+  - id: npr-world
+    name: NPR World
+    url: https://feeds.npr.org/1004/rss.xml
+    type: rss
+    language: en
+    region: americas
+    perspective: us-public-media
+    weight: 0.8
+    fetch_interval_minutes: 60
+    enabled: true
+  - id: scmp-news
+    name: South China Morning Post
+    url: https://www.scmp.com/rss/91/feed
+    type: rss
+    language: en
+    region: asia
+    perspective: hongkong-perspective
+    weight: 0.85
+    fetch_interval_minutes: 30
+    enabled: true
+  - id: nikkei-asia
+    name: Nikkei Asia
+    url: https://asia.nikkei.com/rss/feed/nar
+    type: rss
+    language: en
+    region: asia
+    perspective: japan-perspective
+    weight: 0.9
+    fetch_interval_minutes: 60
+    enabled: true
+  - id: the-diplomat
+    name: The Diplomat
+    url: https://thediplomat.com/feed/
+    type: rss
+    language: en
+    region: asia-pacific
+    perspective: asia-pacific-analysis
+    weight: 0.8
+    fetch_interval_minutes: 120
+    enabled: true
+  - id: globalvoices
+    name: Global Voices
+    url: https://globalvoices.org/feed/
+    type: rss
+    language: en
+    region: global
+    perspective: southern-perspective
+    weight: 0.7
+    fetch_interval_minutes: 120
+    enabled: true
+  - id: chinanews-scroll
+    name: 中新网即时新闻
+    url: https://www.chinanews.com.cn/rss/scroll-news.xml
+    type: rss
+    language: zh
+    region: china
+    perspective: china-state-media
+    weight: 0.9
+    fetch_interval_minutes: 30
+    enabled: true
+  - id: chinanews-import
+    name: 中新网要闻导读
+    url: https://www.chinanews.com.cn/rss/importnews.xml
+    type: rss
+    language: zh
+    region: china
+    perspective: china-state-media
+    weight: 0.85
+    fetch_interval_minutes: 30
+    enabled: true
+  - id: gnews-reuters
+    name: Reuters via Google News
+    url: https://news.google.com/rss/search?q=when:24h%20site:reuters.com&hl=en-US&gl=US&ceid=US:en
+    type: rss
+    language: en
+    region: global
+    perspective: wire-bridged
+    weight: 1.0
+    fetch_interval_minutes: 60
+    enabled: true
+  - id: gnews-ap
+    name: AP via Google News
+    url: https://news.google.com/rss/search?q=when:24h%20site:apnews.com&hl=en-US&gl=US&ceid=US:en
+    type: rss
+    language: en
+    region: global
+    perspective: wire-bridged
+    weight: 1.0
+    fetch_interval_minutes: 60
+    enabled: true
+  - id: gnews-xinhua
+    name: Xinhua EN via Google News
+    url: https://news.google.com/rss/search?q=when:24h%20site:news.cn&hl=en-US&gl=US&ceid=US:en
+    type: rss
+    language: en
+    region: china
+    perspective: china-state-media
+    weight: 0.85
+    fetch_interval_minutes: 60
+    enabled: true
+  - id: gnews-globaltimes
+    name: Global Times via Google News
+    url: https://news.google.com/rss/search?q=when:24h%20site:globaltimes.cn&hl=en-US&gl=US&ceid=US:en
+    type: rss
+    language: en
+    region: china
+    perspective: china-state-media
+    weight: 0.7
+    fetch_interval_minutes: 60
+    enabled: true
+  - id: gnews-caixin
+    name: 财新 via Google News
+    url: https://news.google.com/rss/search?q=when:24h%20site:caixin.com&hl=zh-CN&gl=CN&ceid=CN:zh
+    type: rss
+    language: zh
+    region: china
+    perspective: china-market-media
+    weight: 0.8
+    fetch_interval_minutes: 60
+    enabled: true
