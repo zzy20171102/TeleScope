@@ -42,6 +42,11 @@ CREATE TABLE IF NOT EXISTS citations(
   brief_id INTEGER, event_id INTEGER, article_id INTEGER,
   span TEXT, url TEXT, verified INTEGER, created_at TEXT);
 CREATE INDEX IF NOT EXISTS idx_citations_brief ON citations(brief_id);
+CREATE TABLE IF NOT EXISTS event_relations(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  prior_event_id INTEGER, target_event_id INTEGER, type TEXT,
+  narrative TEXT, evidence TEXT, confidence REAL, status TEXT, created_at TEXT);
+CREATE INDEX IF NOT EXISTS idx_relations_target ON event_relations(target_event_id);
 CREATE TABLE IF NOT EXISTS runs(
   id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, trigger TEXT,
   status TEXT, created_at TEXT, checkpoint TEXT);
@@ -156,6 +161,62 @@ def save_citations(conn: sqlite3.Connection, brief_id: int,
     return len(rows)
 
 
+def history_events(conn: sqlite3.Connection, days: int = 180,
+                    exclude_ids: tuple[int, ...] = (),
+                    max_events: int = 500) -> list[dict[str, Any]]:
+    """Historical events (with articles + entity sets) for F2 lineage recall."""
+    cutoff = (dt.datetime.now(dt.timezone.utc)
+              - dt.timedelta(days=days)).isoformat(timespec="seconds")
+    q = "SELECT * FROM events WHERE first_seen >= ?"
+    params: list[Any] = [cutoff]
+    if exclude_ids:
+        q += " AND id NOT IN (" + ",".join("?" * len(exclude_ids)) + ")"
+        params.extend(exclude_ids)
+    q += " ORDER BY first_seen DESC LIMIT ?"
+    params.append(max_events)
+    out: list[dict[str, Any]] = []
+    for r in conn.execute(q, params).fetchall():
+        arts = conn.execute(
+            "SELECT a.id, a.title, a.url, a.source_id, a.content_text, a.entities "
+            "FROM articles a JOIN event_articles ea ON ea.article_id = a.id "
+            "WHERE ea.event_id = ? ORDER BY a.id LIMIT 8", (r["id"],)).fetchall()
+        ents: set[str] = set()
+        articles: list[dict[str, Any]] = []
+        for a in arts:
+            ents.update(json.loads(a["entities"] or "[]"))
+            articles.append({"id": a["id"], "title": a["title"], "url": a["url"],
+                             "source_id": a["source_id"],
+                             "text": a["content_text"] or ""})
+        out.append({"id": r["id"], "title": r["title"], "category": r["category"],
+                    "severity": r["severity"], "first_seen": r["first_seen"],
+                    "last_seen": r["last_seen"], "article_count": r["article_count"],
+                    "source_count": r["source_count"], "entities": sorted(ents),
+                    "articles": articles})
+    return out
+
+
+def save_event_relations(conn: sqlite3.Connection, relations) -> int:
+    """Persist F2 lineage edges (evidence JSON = [{article_id, span, url}])."""
+    from .models import EventRelation
+
+    rows: list[tuple[Any, ...]] = []
+    for rel in relations:
+        if not isinstance(rel, EventRelation):
+            continue
+        evidence = [{"article_id": c.article_id, "span": c.span, "url": c.url}
+                    for c in rel.evidence]
+        rows.append((rel.prior_event_id, rel.target_event_id, rel.type,
+                     rel.narrative, json.dumps(evidence, ensure_ascii=False),
+                     rel.confidence, rel.status, _now()))
+    conn.executemany(
+        "INSERT INTO event_relations(prior_event_id,target_event_id,type,narrative,"
+        "evidence,confidence,status,created_at) VALUES(?,?,?,?,?,?,?,?)",
+        rows,
+    )
+    conn.commit()
+    return len(rows)
+
+
 def start_run(conn: sqlite3.Connection, kind: str, trigger: str) -> int:
     cur = conn.execute(
         "INSERT INTO runs(kind,trigger,status,created_at,checkpoint) VALUES(?,?,?,?,?)",
@@ -186,4 +247,5 @@ def stats(conn: sqlite3.Connection) -> dict[str, Any]:
         return int(conn.execute(f"SELECT COUNT(*) c FROM {table}").fetchone()["c"])
 
     return {t: count(t) for t in
-            ("sources", "articles", "events", "briefs", "citations", "runs")}
+            ("sources", "articles", "events", "briefs", "citations",
+             "event_relations", "runs")}

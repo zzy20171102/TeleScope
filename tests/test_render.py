@@ -1,6 +1,6 @@
 import unittest
 
-from telescope.models import BriefItem
+from telescope.models import BriefItem, Citation, EventRelation
 from telescope.render.brief import render_daily
 
 
@@ -53,6 +53,44 @@ class TestRender(unittest.TestCase):
         self.assertIn("- **引文**：Lead sentence one. [1]", out)
         self.assertIn("引用校验：引文 1/1，低置信 1", out)
         self.assertIn("⚠️ 引用待核", out)
+
+    def test_lineage_timeline_and_mermaid(self):
+        rel = EventRelation(prior_event_id=12, target_event_id=45, type="causal",
+                            narrative="制裁决议引发被制裁方反制", confidence=0.85,
+                            prior_title="US imposes new sanctions on Russia",
+                            prior_date="2026-09-01",
+                            evidence=[Citation(article_id=11, span="quote text")])
+        items = [BriefItem(headline="Russia retaliates", summary="S.", impact="",
+                           citation_ids=[11], event_id=45, traced=True,
+                           lineage=[rel])]
+        arts = {11: {"id": 11, "title": "A", "url": "https://a.com/1", "source_id": "s"}}
+        out = render_daily("2026-09-11", items, arts, {"s": "S"},
+                           {"backend": "rule"})
+        self.assertIn("- **事件溯源**：", out)
+        self.assertIn("2026-09-01｜前因｜US imposes new sanctions on Russia"
+                      "[1]（置信 0.85）", out)
+        self.assertIn("    - 制裁决议引发被制裁方反制", out)
+        self.assertIn("```mermaid", out)
+        self.assertIn("graph TD", out)
+        self.assertIn("-->|前因| T45", out)
+
+    def test_lineage_low_confidence_flagged(self):
+        rel = EventRelation(prior_event_id=12, target_event_id=45, type="background",
+                            narrative="背景关联", confidence=0.5,
+                            prior_title="Prior event title", prior_date="2026-09-01",
+                            evidence=[Citation(article_id=11, span="quote text")])
+        items = [BriefItem(headline="H", summary="S.", impact="",
+                           citation_ids=[11], traced=True, lineage=[rel])]
+        arts = {11: {"id": 11, "title": "A", "url": "https://a.com/1", "source_id": "s"}}
+        out = render_daily("2026-09-11", items, arts, {"s": "S"}, {"backend": "rule"})
+        self.assertIn("（置信 0.50，待复核）", out)
+
+    def test_lineage_isolated(self):
+        items = [BriefItem(headline="New event", summary="S.", impact="",
+                           citation_ids=[11], traced=True, lineage=[])]
+        arts = {11: {"id": 11, "title": "A", "url": "https://a.com/1", "source_id": "s"}}
+        out = render_daily("2026-09-11", items, arts, {"s": "S"}, {"backend": "rule"})
+        self.assertIn("- **事件溯源**：历史窗口内无关联事件（新发/孤立事件）", out)
 
 
 if __name__ == "__main__":

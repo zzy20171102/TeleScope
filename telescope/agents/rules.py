@@ -15,6 +15,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ..pipeline.cluster import jaccard
+from ..pipeline.normalize import token_set
+
 
 def _compile(kws: list[str]) -> list[re.Pattern[str]]:
     pats: list[re.Pattern[str]] = []
@@ -136,6 +139,56 @@ def summarize_rule(event: dict[str, Any],
     }
 
 
+def trace_rule(target: dict[str, Any],
+               candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    """Deterministic F2 fallback: entity-overlap links with honest low
+    confidence; near-duplicate stories (re-clustered) are skipped."""
+    target_ents = set(target.get("entities", []))
+    target_toks = token_set(str(target.get("title", "")))
+    target_arts = target.get("articles", [])
+    relations: list[dict[str, Any]] = []
+    for c in candidates:
+        cand_ents = set(c.get("entities", []))
+        shared = target_ents & cand_ents
+        if not shared:
+            continue
+        cand_toks = token_set(str(c.get("title", "")))
+        if jaccard(target_toks, cand_toks) >= 0.60:
+            continue  # same story re-clustered, not a prior cause
+        t_sev = float(target.get("severity", 1.0))
+        c_sev = float(c.get("severity", 1.0))
+        if (t_sev >= c_sev + 0.2 and target.get("category") == "military"
+                and c.get("category") == "military"):
+            rtype = "escalation"
+        else:
+            rtype = "background"
+        evidence: list[dict[str, Any]] = []
+        cand_arts = c.get("articles", [])
+        if cand_arts:
+            lead = _sentences(str(cand_arts[0].get("text", "")) or
+                              str(cand_arts[0].get("title", "")), 1)
+            if lead:
+                evidence.append({"article_id": cand_arts[0].get("id"),
+                                 "quote_span": lead[0]})
+        if target_arts:
+            lead = _sentences(str(target_arts[0].get("text", "")) or
+                              str(target_arts[0].get("title", "")), 1)
+            if lead:
+                evidence.append({"article_id": target_arts[0].get("id"),
+                                 "quote_span": lead[0]})
+        if not evidence:
+            continue
+        conf = min(0.6, 0.3 + 0.1 * min(len(shared), 3))
+        relations.append({
+            "prior_event": c.get("id"), "type": rtype,
+            "narrative": "规则关联：共享实体 " + "、".join(sorted(shared)[:3]) +
+                         "；" + str(c.get("title", ""))[:60] +
+                         " 为当前事件的相关背景。",
+            "evidence": evidence, "confidence": round(conf, 2),
+        })
+    return {"relations": relations, "isolated": not relations}
+
+
 def dispatch(prompt_name: str, context: dict[str, Any]) -> dict[str, Any]:
     # unwrap the unified {"items_json": ...} context used by both backends
     if "items_json" in context and "cards" not in context:
@@ -145,7 +198,7 @@ def dispatch(prompt_name: str, context: dict[str, Any]) -> dict[str, Any]:
             payload = json.loads(context["items_json"])
             if prompt_name == "screener" and isinstance(payload, list):
                 context = {"cards": payload}
-            elif prompt_name == "summarizer" and isinstance(payload, dict):
+            elif prompt_name in ("summarizer", "event_tracer") and isinstance(payload, dict):
                 context = payload
         except (ValueError, TypeError):
             pass
@@ -158,4 +211,6 @@ def dispatch(prompt_name: str, context: dict[str, Any]) -> dict[str, Any]:
         return {"results": results}
     if prompt_name == "summarizer":
         return summarize_rule(context.get("event", {}), context.get("articles", []))
+    if prompt_name == "event_tracer":
+        return trace_rule(context.get("target", {}), context.get("candidates", []))
     raise ValueError(f"unknown prompt: {prompt_name}")

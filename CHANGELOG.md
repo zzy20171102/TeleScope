@@ -2,6 +2,20 @@
 
 格式参考 Keep a Changelog；版本号遵循语义化版本。
 
+## [0.6.0] - 2026-09-11
+
+### Added — M1/T2.2 F2 事件溯源引擎（DESIGN 4.3 四阶段流水线）
+
+- **Stage 1 混合召回** `telescope/pipeline/recall.py`：确定性、零 LLM——实体通道（权重 0.45）+ 词法通道（0.25，向量通道在 M2 pgvector 前以 token Jaccard 代理）+ 时间衰减（0.15）+ 主题匹配（0.15）；硬时间窗过滤（默认 180 天）；标题 Jaccard ≥0.60 判为"同一故事重聚类"直接跳过（防把重复当谱系）。
+- **Stage 2 EventTracer Agent** `telescope/agents/tracer.py` + `prompts/event_tracer.md.j2` v0.1.0：LLM 只判定联系不生成事实；确定性后验强制——候选必须在召回列表内、type 受七类字典约束、causal/escalation 时序违背自动降级 thematic_parallel、evidence 必须逐字命中文章快照（复用 T2.1 span 校验）、无有效证据的联系整体丢弃（防幻觉：禁止强行关联）；LLM 失败自动降级 `trace_rule`（实体共现 + 诚实低置信 ≤0.6）。
+- **Stage 3 谱系渲染**：简报条目下"事件溯源"时间线（日期｜类型｜前事件标题[锚点]｜置信度），头条附 Mermaid 关系图；置信 <0.7 标注"待复核"；召回为空显式输出"历史窗口内无关联事件（新发/孤立事件）"。
+- **Stage 4 图谱沉淀**：`event_relations` 表（prior/target/type/narrative/evidence JSON/confidence/status）+ `storage.history_events()` 历史加载（含实体聚合与文章快照）；tracer 每事件记录 steps 审计；run checkpoint 新增 traced_items / lineage_relations。
+- `EventRelation` / `Citation` 数据类；`BriefItem.lineage/traced` 字段。
+
+### Verified
+
+- 离线测试 61 个全绿（48→61），0.58s（无网）；真实库副本回归：Top3 溯源命中 2 条证据关联（均待复核）、1 条正确判孤立，event_relations 落库、Mermaid/时间线/锚点渲染正常。
+
 ## [0.5.0] - 2026-09-11
 
 ### Added — M1/T2.1 引用校验 + Reviewer 质检

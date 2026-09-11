@@ -80,6 +80,21 @@ class Citation:
 
 
 @dataclass
+class EventRelation:
+    """F2 lineage edge: prior_event -> target_event, always evidence-backed."""
+    prior_event_id: int
+    target_event_id: int
+    type: str = "background"  # causal/escalation/de_escalation/response/
+    #                          # background/same_actor/thematic_parallel
+    narrative: str = ""
+    evidence: list[Citation] = field(default_factory=list)
+    confidence: float = 0.0
+    prior_title: str = ""
+    prior_date: str = ""
+    status: str = "auto"  # auto / review
+
+
+@dataclass
 class ScreenResult:
     id: int
     relevant: bool
@@ -106,6 +121,9 @@ class BriefItem:
     quote_citations: list[Optional[int]] = field(default_factory=list)
     confidence: str = "high"  # "high" / "low" after citation validation
     issues: list[str] = field(default_factory=list)  # compact reviewer issues
+    # F2 lineage (M1/T2.2): relations to prior events, evidence-validated
+    lineage: list[EventRelation] = field(default_factory=list)
+    traced: bool = False  # lineage tracing attempted for this item
 
 
 def to_dict(obj: Any) -> dict[str, Any]:

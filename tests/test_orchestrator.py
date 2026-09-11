@@ -1,11 +1,13 @@
 import datetime as dt
+import json
 import os
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 
-from telescope.models import Article
+from telescope import storage
+from telescope.models import Article, Event
 from telescope.orchestrator import run_daily
 from telescope.pipeline.normalize import extract_entities, url_hash
 
@@ -28,6 +30,27 @@ INJECT = [
     mk("bbc-world", "https://d.com/4", "Local cake festival draws crowds",
        "A baking contest was held downtown."),
 ]
+
+
+def seed_prior_event(db_path: Path) -> int:
+    """Seed one historical event (5 days ago) sharing an entity with the
+    sanctions story, so the F2 lineage engine has something to recall."""
+    conn = storage.connect(db_path)
+    title = "Congress debates new Russia sanctions bill"
+    text = "Congress debated a new bill targeting Russia. Analysts expect a vote."
+    ago = (dt.datetime.now(dt.timezone.utc)
+           - dt.timedelta(days=5)).isoformat(timespec="seconds")
+    a = Article(source_id="reuters-world",
+                url="https://h.com/prior/1", url_hash=url_hash("https://h.com/prior/1"),
+                title=title, content_text=text,
+                entities=extract_entities(title + " " + text), published_at=ago)
+    aid = storage.upsert_article(conn, a)
+    ev = Event(title=title, category="diplomacy", severity=1.2,
+               article_ids=[aid], source_ids=["reuters-world"],
+               first_seen=ago, last_seen=ago)
+    eid = storage.save_event(conn, ev)
+    conn.close()
+    return eid
 
 
 class TestOrchestrator(unittest.TestCase):
@@ -71,6 +94,35 @@ class TestOrchestrator(unittest.TestCase):
             run_row = conn.execute(
                 "SELECT checkpoint FROM runs ORDER BY id DESC").fetchone()
             self.assertIn("quotes_kept", run_row["checkpoint"])
+            conn.close()
+
+    def test_end_to_end_lineage(self):
+        self._force_rule_backend()
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "t.db"
+            prior_id = seed_prior_event(db)
+            out = run_daily(inject_articles=INJECT, db_path=db,
+                            brief_dir=Path(td) / "briefs", top_n=6,
+                            trace_n=3, trigger="test-lineage")
+            body = out.read_text(encoding="utf-8")
+            self.assertIn("事件溯源", body)
+            self.assertIn("Congress debates", body)  # prior event recalled
+            conn = sqlite3.connect(db)
+            conn.row_factory = sqlite3.Row
+            rels = conn.execute(
+                "SELECT * FROM event_relations WHERE prior_event_id=?",
+                (prior_id,)).fetchall()
+            self.assertTrue(rels)
+            self.assertEqual(rels[0]["target_event_id"] > 0, True)
+            self.assertIn("article_id", rels[0]["evidence"])
+            traced = conn.execute(
+                "SELECT COUNT(*) c FROM steps WHERE agent=?", ("tracer",)
+            ).fetchone()["c"]
+            self.assertGreaterEqual(traced, 1)
+            ck = json.loads(conn.execute(
+                "SELECT checkpoint FROM runs ORDER BY id DESC").fetchone()["checkpoint"])
+            self.assertGreaterEqual(ck["traced_items"], 1)
+            self.assertGreaterEqual(ck["lineage_relations"], 1)
             conn.close()
 
 

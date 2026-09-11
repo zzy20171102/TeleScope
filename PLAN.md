@@ -69,6 +69,7 @@
 | 2026-09-01 | **M0 完成**：零依赖骨架、20 源、端到端、24 离线单测全绿。 |
 | 2026-09-01 | **M0.5 完成**：MiniMax 接入实测通过；真实简报 805 文章/157 事件。 |
 | 2026-09-01 | **P0 完成**：三轮真实数据迭代验证——(1) 聚类防漂移+关键词边界修复：头条从"屠宰场新闻"变为真实国际要闻（基辅连续空袭/美伊交火/以色列将领警告），聚类事件数 157→193（漂移簇被拆分）；(2) 降级透明化：头部"LLM 分析 x/y"+逐条⚠️；(3) JSON 三层防御：LLM 成功率 1/6→5/6（根因：模型偶发未转义引号）。测试 37 个全绿（新增 4 个 extract_json 修复测试）。commit + push。 |
+| 2026-09-11 | **M1/T2.2 完成**：F2 事件溯源引擎上线——混合召回（实体/词法/主题/时间窗+重聚类去重）、EventTracer Agent（LLM 判定+确定性后验：类型/方向/证据 span 校验）、`event_relations` 表、简报时间线+Mermaid 谱系渲染（置信分层+孤立事件标注）、prompt event_tracer v0.1.0、规则降级路径 trace_rule。真实库副本回归：Top3 溯源 2 项命中证据关联（待复核）、1 项正确判孤立。测试 61 个全绿（48→61）。 |
 | 2026-09-11 | **M1/T2.1 完成**：引用校验器 + Reviewer 质检智能体上线——span 存在性校验（失败引文剔除+低置信降级+⚠️标注）、`citations` 表落库（真实库回归 24 条）、简报头部"引用校验 x/y"、summarizer prompt v0.3.0（key_quotes 逐字摘录）；真实库副本回归：1025 文章/216 事件/Top6，引文 12/12 通过。顺手修复 test_storage 时间炸弹（写死 2026-09-01 滑窗失败）。测试 48 个全绿（37→48）。 |
 
 ## M1 任务清单（进行中）
@@ -76,7 +77,7 @@
 | # | 任务 | 方案 | 状态 |
 |---|---|---|---|
 | T2.1 | 引用校验器 + Reviewer 质检智能体 | `pipeline/verify.py`：span 归一化存在性校验（NFKC+中英引号/破折号统一+空白折叠；过短 span 不可验证：ASCII<12/CJK<6）；`agents/reviewer.py` 确定性 QC 门（LLM 不审计自身输出，span/数字全由代码计算）；失败引文剔除、条目降级低置信并标注 ⚠️ 引用待核；`citations` 表落库（brief/event/article+span+url+verified）；summarizer prompt v0.3.0 要求 key_quotes 逐字摘录；简报头部显示"引用校验 x/y" | ✅ 2026-09-11 |
-| T2.2 | **F2 事件溯源引擎**（M1 主菜） | `event_relations` 表 + 混合召回 + EventTracer Agent + 时间线渲染 | ⬜ |
+| T2.2 | **F2 事件溯源引擎**（M1 主菜） | 四阶段流水线：Stage1 `pipeline/recall.py` 确定性混合召回（实体 0.45/词法 0.25/时间衰减 0.15/主题 0.15，硬时间窗 180 天，标题 Jaccard≥0.60 判为重聚类跳过；向量通道 M2 pgvector 落地前以词法代理）；Stage2 `agents/tracer.py` EventTracer（LLM 仅判定联系；确定性后验：候选白名单/类型字典/因果时序方向违背降级 thematic_parallel/证据 span 逐字校验，无证据即丢弃，禁止强行关联）；Stage3 渲染：时间线+Mermaid+引用锚点+置信分层（≥0.7 auto，<0.7 待复核，孤立事件显式标注）；Stage4 `event_relations` 表沉淀（evidence JSON）+ tracer 审计步骤 | ✅ 2026-09-11 |
 | T2.3 | 源管理 CLI | 增删改查/启停/健康监控 | ⬜ |
 | T2.4 | 人机反馈标注回流 | feedback 表 + CLI 标注命令 | ⬜ |
 | T2.5 | Windows 任务计划定时运行 | 每日 07:00 | ⬜ |

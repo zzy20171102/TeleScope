@@ -14,11 +14,11 @@ TeleScope 从国内外公开新闻渠道持续采集内容，经多语言处理�
 
 ```bash
 # 无任何第三方依赖（Python >= 3.10）
-python -m telescope run              # 采集→去重→聚类→评分→筛选→摘要→引用校验→简报，输出 briefs/YYYY-MM-DD.md
+python -m telescope run              # 采集→去重→聚类→评分→筛选→摘要→引用校验→事件溯源→简报，输出 briefs/YYYY-MM-DD.md
 python -m telescope fetch            # 仅采集入库
 python -m telescope sources          # 查看源配置
 python -m telescope stats            # 查看库内统计
-python -m unittest discover -s tests # 运行离线测试（48 个，2 个 live 默认跳过）
+python -m unittest discover -s tests # 运行离线测试（61 个，2 个 live 默认跳过）
 ```
 
 ### 启用 LLM（可选，已实测 MiniMax）
@@ -51,6 +51,12 @@ LLM 调用失败自动降级规则模式，并在 `steps` 表记录 error_card�
 （容忍大小写/空白/中英引号差异），未命中即剔除并将该条目降级为低置信（⚠️ 引用待核）；
 通过校验的 citation（article_id + span + URL）写入 `citations` 表。
 
+简报头部条目还附带 **事件溯源（F2）**：对头条事件从历史事件库混合召回候选
+（实体/词法/主题/时间窗），由 EventTracer 判定七类联系（前因/升级/缓和/回应/
+背景/同一行为体/同题平行）；每条联系必须有逐字命中原文的证据 span，否则丢弃；
+结果渲染为时间线 + Mermaid 谱系并沉淀 `event_relations` 表（置信度 <0.7 标注待复核，
+无关联时明确输出"孤立/新发事件"，禁止强行关联）。
+
 ## 目录结构
 
 ```
@@ -58,8 +64,8 @@ config/sources.yaml   # 新闻源配置（单一事实来源）
 prompts/              # 版本化提示词模板
 telescope/
   collectors/         # RSS/Atom/RDF 采集
-  pipeline/           # 规范化/去重/聚类/评分/引用校验
-  agents/             # LLM 后端 + Screener/Summarizer/Reviewer
+  pipeline/           # 规范化/去重/聚类/评分/引用校验/溯源召回
+  agents/             # LLM 后端 + Screener/Summarizer/Reviewer/EventTracer
   render/             # 简报渲染
   storage.py          # SQLite 存储与审计
   orchestrator.py     # 确定性 DAG 编排

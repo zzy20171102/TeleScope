@@ -13,6 +13,27 @@ from ..models import BriefItem
 
 TOPIC_ZH = {"military": "军事", "diplomacy": "外交", "economy": "经济",
             "tech": "科技", "politics": "政治", "society": "社会", "other": "综合"}
+TYPE_ZH = {"causal": "前因", "escalation": "升级", "de_escalation": "缓和",
+           "response": "回应", "background": "背景", "same_actor": "同一行为体",
+           "thematic_parallel": "同题平行"}
+
+
+def _mq(s: str) -> str:
+    return s.replace(chr(34), chr(39)).replace("|", "/")[:60]
+
+
+def _mermaid(item: BriefItem) -> list[str]:
+    if not item.lineage:
+        return []
+    tid = f"T{item.event_id or 0}"
+    out = ["```mermaid", "graph TD",
+           f"  {tid}[{_mq(item.headline)}]"]
+    for rel in item.lineage:
+        pid = f"P{rel.prior_event_id}"
+        out.append(f"  {pid}[{_mq(rel.prior_date + chr(32) + rel.prior_title)}]")
+        out.append(f"  {pid} -->|{TYPE_ZH.get(rel.type, rel.type)}| {tid}")
+    out.append("```")
+    return out
 
 
 def _anchors(citation_ids: list[int], index: dict[int, int]) -> str:
@@ -37,6 +58,10 @@ def render_daily(date: str, items: list[BriefItem],
         for cid in it.citation_ids:
             if cid in articles_by_id:
                 reg(cid)
+        for rel in it.lineage:
+            for c in rel.evidence:
+                if c.article_id in articles_by_id:
+                    reg(c.article_id)
 
     backend = str(meta.get("backend", "rule"))
     degraded = backend != "rule"
@@ -85,6 +110,27 @@ def render_daily(date: str, items: list[BriefItem],
                 lines.append(f"- **引文**：{q}{anchor}")
             if it.impact:
                 lines.append(f"- **影响初判**：{it.impact}")
+            if it.traced:
+                if it.lineage:
+                    lines.append("- **事件溯源**：")
+                    for rel in it.lineage:
+                        anchors = "".join(f"[{index[c.article_id]}]"
+                                          for c in rel.evidence
+                                          if c.article_id in index)
+                        flag = "" if rel.confidence >= 0.7 else "，待复核"
+                        lines.append(f"  - {rel.prior_date}｜"
+                                     f"{TYPE_ZH.get(rel.type, rel.type)}｜"
+                                     f"{rel.prior_title}{anchors}"
+                                     f"（置信 {rel.confidence:.2f}{flag}）")
+                        if rel.narrative:
+                            lines.append(f"    - {rel.narrative}")
+                    if i == 1:
+                        block = _mermaid(it)
+                        if block:
+                            lines.append("")
+                            lines.extend(block)
+                else:
+                    lines.append("- **事件溯源**：历史窗口内无关联事件（新发/孤立事件）")
             lines.append("")
     if rest:
         lines.append("## 分类速览")

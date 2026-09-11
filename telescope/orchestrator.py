@@ -12,11 +12,13 @@ from .agents.llm import get_backend
 from .agents.reviewer import Reviewer
 from .agents.screener import Screener
 from .agents.summarizer import Summarizer
+from .agents.tracer import EventTracer
 from .collectors import rss
 from .config import BRIEF_DIR, DB_PATH, load_sources
-from .models import Article
+from .models import Article, Event
 from .pipeline.cluster import OnlineClusterer
 from .pipeline.dedup import InBatchDeduper
+from .pipeline import recall as recall_mod
 from .pipeline.normalize import detect_lang, extract_entities, url_hash
 from .pipeline.scoring import hot_score
 from .render.brief import render_daily
@@ -70,7 +72,8 @@ def _card_text(card_arts: list[Article],
     return text[:1600]
 
 
-def run_daily(hours: int = 24, top_n: int = 6,
+def run_daily(hours: int = 24, top_n: int = 6, trace_n: int = 3,
+              trace_days: int = 180,
               inject_articles: Optional[list[Article]] = None,
               db_path: "Path | str | None" = None,
               brief_dir: "Path | str | None" = None,
@@ -148,6 +151,7 @@ def run_daily(hours: int = 24, top_n: int = 6,
     # 6. summarize top events; track backend mode per item
     summarizer = Summarizer(backend)
     items = []
+    summarize_ctx: list[tuple[Event, list[Article]]] = []
     for ev in events[:top_n]:
         card_arts = [arts_by_id[aid] for aid in ev.article_ids if aid in arts_by_id]
         payload_arts = [{"id": a.id, "title": a.title, "text": a.content_text,
@@ -161,6 +165,7 @@ def run_daily(hours: int = 24, top_n: int = 6,
         )
         item.event_id = storage.save_event(conn, ev)
         items.append(item)
+        summarize_ctx.append((ev, card_arts))
         if backend.name != "rule" and item.mode == "rule":
             card = "fallback:rule"
             if summarizer.last_error:
@@ -184,6 +189,47 @@ def run_daily(hours: int = 24, top_n: int = 6,
                     if review_report["issues"] else ""),
     )
 
+    # 7.5 trace lineage (F2): deterministic recall + EventTracer judgment
+    tracer = EventTracer(backend)
+    relations_saved = 0
+    if trace_n > 0:
+        exclude_ids = tuple({it.event_id for it in items
+                             if it.event_id is not None})
+        history = storage.history_events(conn, days=trace_days,
+                                            exclude_ids=exclude_ids)
+        for item, (ev, ev_arts) in zip(items[:trace_n],
+                                       summarize_ctx[:trace_n]):
+            item.traced = True
+            ents: set[str] = set()
+            for a in ev_arts:
+                ents.update(a.entities)
+            target = {"id": item.event_id, "title": ev.title,
+                      "category": ev.category, "severity": ev.severity,
+                      "first_seen": ev.first_seen, "entities": sorted(ents),
+                      "articles": [{"id": a.id, "title": a.title, "url": a.url,
+                                    "source_id": a.source_id,
+                                    "text": a.content_text}
+                                   for a in ev_arts[:2]]}
+            cands = recall_mod.recall(target, history, top_k=6,
+                                      window_days=trace_days)
+            trace_map = dict(articles_by_id)
+            for c in cands:
+                for a in c.get("articles", []):
+                    if a.get("id") is not None:
+                        trace_map.setdefault(int(a["id"]), a)
+            relations, tmeta = tracer.trace(target, cands, trace_map)
+            item.lineage = relations
+            if relations:
+                for rel in relations:
+                    for c in rel.evidence:
+                        if c.article_id in trace_map and c.article_id not in articles_by_id:
+                            articles_by_id[c.article_id] = trace_map[c.article_id]
+                relations_saved += storage.save_event_relations(conn, relations)
+            storage.record_step(
+                conn, run_id, "tracer", f"event:{item.event_id}",
+                output_ref=json.dumps(tmeta, ensure_ascii=False)[:300],
+                error_card=tracer.last_error[:250] if tracer.last_error else "")
+
     # 8. render + publish (+ persist verified citations)
     llm_count = sum(1 for it in items if it.mode == backend.name and backend.name != "rule")
     meta = {"generated_at": now.isoformat(timespec="seconds"),
@@ -206,6 +252,8 @@ def run_daily(hours: int = 24, top_n: int = 6,
         "quotes_total": review_report["quotes_total"],
         "low_confidence_items": review_report["low_confidence"],
         "citations": citation_count,
+        "traced_items": min(trace_n, len(items)) if trace_n > 0 else 0,
+        "lineage_relations": relations_saved,
     })
     conn.close()
     return out_path
