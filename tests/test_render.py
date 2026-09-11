@@ -40,6 +40,20 @@ class TestRender(unittest.TestCase):
         self.assertIn("模式：openai-compat（LLM 分析 1/2，规则降级 1）", out)
         self.assertIn("⚠️ 规则降级", out)
 
+    def test_quote_anchors_and_validation_stats(self):
+        items = [BriefItem(headline="Big event", summary="S.", impact="",
+                           citation_ids=[11], key_quotes=["Lead sentence one."],
+                           quote_citations=[11], confidence="high"),
+                 BriefItem(headline="Low conf event", summary="S.", impact="",
+                           citation_ids=[11], confidence="low")]
+        arts = {11: {"id": 11, "title": "A", "url": "https://a.com/1", "source_id": "s"}}
+        out = render_daily("2026-09-01", items, arts, {"s": "S"},
+                           {"backend": "rule", "quotes_total": 1, "quotes_kept": 1,
+                            "low_confidence": 1})
+        self.assertIn("- **引文**：Lead sentence one. [1]", out)
+        self.assertIn("引用校验：引文 1/1，低置信 1", out)
+        self.assertIn("⚠️ 引用待核", out)
+
 
 if __name__ == "__main__":
     unittest.main()

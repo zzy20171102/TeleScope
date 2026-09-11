@@ -1,5 +1,6 @@
 import datetime as dt
 import os
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -57,6 +58,20 @@ class TestOrchestrator(unittest.TestCase):
             self.assertNotIn("cake festival", body)
             db = Path(td) / "t.db"
             self.assertTrue(db.exists())
+            # M1.1: reviewer gate ran, citation validation stats rendered
+            self.assertIn("引用校验", body)
+            conn = sqlite3.connect(db)
+            conn.row_factory = sqlite3.Row
+            self.assertTrue(conn.execute(
+                "SELECT COUNT(*) c FROM citations").fetchone()["c"] > 0)
+            reviewer = conn.execute(
+                "SELECT COUNT(*) c FROM steps WHERE agent=?", ("reviewer",)
+            ).fetchone()["c"]
+            self.assertEqual(reviewer, 1)
+            run_row = conn.execute(
+                "SELECT checkpoint FROM runs ORDER BY id DESC").fetchone()
+            self.assertIn("quotes_kept", run_row["checkpoint"])
+            conn.close()
 
 
 if __name__ == "__main__":

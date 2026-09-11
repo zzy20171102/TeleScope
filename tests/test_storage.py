@@ -1,3 +1,4 @@
+import datetime as dt
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,7 +13,7 @@ class TestStorage(unittest.TestCase):
             conn = storage.connect(Path(td) / "t.db")
             a = Article(source_id="s1", url="https://a.com/1", url_hash="h1",
                         title="T", content_text="body", lang="en",
-                        published_at="2026-09-01T00:00:00+00:00", entities=["中国"])
+                        published_at=dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), entities=["中国"])
             aid = storage.upsert_article(conn, a)
             self.assertIsNotNone(aid)
             self.assertIsNone(storage.upsert_article(conn, a))  # idempotent

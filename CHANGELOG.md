@@ -2,6 +2,25 @@
 
 格式参考 Keep a Changelog；版本号遵循语义化版本。
 
+## [0.5.0] - 2026-09-11
+
+### Added — M1/T2.1 引用校验 + Reviewer 质检
+
+- **引用校验器** `telescope/pipeline/verify.py`：citation = article_id + 原文 span + URL；span 存在性校验（NFKC + 中英引号/破折号统一 + 空白折叠 + casefold；过短 span 视为不可验证：ASCII<12 / CJK<6）；未命中原文快照的引文自动剔除。
+- **Reviewer 质检智能体** `telescope/agents/reviewer.py`：确定性 QC 门（摘要后、渲染前），不让 LLM 审计自身输出；未知 citation 剔除、span 未命中引文剔除、空摘要检测；命中问题将条目降级 `confidence=low`，简报中标注"⚠️ 引用待核"。
+- **citations 表**：brief_id/event_id/article_id/span/url/verified 落库；run checkpoint 记录 quotes_kept/total、low_confidence、citations 计数；steps 表记录 reviewer 审计（output_ref=统计、error_card=压缩问题）。
+- **简报渲染**：头部新增"引用校验：引文 x/y（低置信 n）"；通过校验的关键引文按原文渲染并绑定 [n] 锚点。
+- **summarizer prompt v0.3.0**：key_quotes 必须逐字摘自所引报道原文（保留原语言与标点，不得改写/翻译/拼接）。
+- `BriefItem` 新增 event_id / quote_citations / confidence / issues；新增 `Citation` 数据类。
+
+### Fixed
+
+- `tests/test_storage.py` 时间炸弹：写死 `published_at=2026-09-01`，10 天后滑出 `articles_since` 窗口导致断言失败；改为动态当前时间。
+
+### Verified
+
+- 离线测试 48 个全绿（37→48），0.26s（无网）；真实库副本回归（1025 文章/216 事件/Top6）：引文校验 12/12 通过、24 条 citation 落库、reviewer 审计步骤记录完整。
+
 ## [0.4.0] - 2026-09-01
 
 ### Fixed — P0 质量快修（三轮真实数据迭代验证）

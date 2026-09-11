@@ -70,6 +70,16 @@ class Event:
 
 
 @dataclass
+class Citation:
+    """Verified citation: article_id + verbatim span + URL (business rule:
+    every analytical claim must trace back to verbatim source text)."""
+    article_id: int
+    span: str
+    url: str = ""
+    verified: bool = True
+
+
+@dataclass
 class ScreenResult:
     id: int
     relevant: bool
@@ -90,6 +100,12 @@ class BriefItem:
     score: float = 0.0
     source_count: int = 1
     mode: str = ""  # which backend produced this item: "rule" / "openai-compat"
+    event_id: Optional[int] = None
+    # Parallel to the surviving key_quotes: article_id whose snapshot contains
+    # each verbatim quote span (span validation may drop quotes entirely).
+    quote_citations: list[Optional[int]] = field(default_factory=list)
+    confidence: str = "high"  # "high" / "low" after citation validation
+    issues: list[str] = field(default_factory=list)  # compact reviewer issues
 
 
 def to_dict(obj: Any) -> dict[str, Any]:

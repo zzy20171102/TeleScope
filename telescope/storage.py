@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Optional
 
-from .models import Article
+from .models import Article, BriefItem
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sources(
@@ -37,6 +37,11 @@ CREATE TABLE IF NOT EXISTS event_entities(
 CREATE TABLE IF NOT EXISTS briefs(
   id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, kind TEXT,
   title TEXT, body_md TEXT, published_at TEXT);
+CREATE TABLE IF NOT EXISTS citations(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  brief_id INTEGER, event_id INTEGER, article_id INTEGER,
+  span TEXT, url TEXT, verified INTEGER, created_at TEXT);
+CREATE INDEX IF NOT EXISTS idx_citations_brief ON citations(brief_id);
 CREATE TABLE IF NOT EXISTS runs(
   id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, trigger TEXT,
   status TEXT, created_at TEXT, checkpoint TEXT);
@@ -131,6 +136,26 @@ def save_brief(conn: sqlite3.Connection, date: str, kind: str, title: str, body_
     return int(cur.lastrowid)
 
 
+def save_citations(conn: sqlite3.Connection, brief_id: int,
+                   items: list[BriefItem],
+                   articles_by_id: dict[int, dict[str, Any]]) -> int:
+    """Persist verified citations (article_id + verbatim span + URL) for a brief."""
+    from .pipeline.verify import citations_for_item
+
+    rows: list[tuple[Any, ...]] = []
+    for it in items:
+        for c in citations_for_item(it, articles_by_id):
+            rows.append((brief_id, it.event_id, c.article_id, c.span,
+                         c.url, int(c.verified), _now()))
+    conn.executemany(
+        "INSERT INTO citations(brief_id,event_id,article_id,span,url,verified,created_at)"
+        " VALUES(?,?,?,?,?,?,?)",
+        rows,
+    )
+    conn.commit()
+    return len(rows)
+
+
 def start_run(conn: sqlite3.Connection, kind: str, trigger: str) -> int:
     cur = conn.execute(
         "INSERT INTO runs(kind,trigger,status,created_at,checkpoint) VALUES(?,?,?,?,?)",
@@ -160,4 +185,5 @@ def stats(conn: sqlite3.Connection) -> dict[str, Any]:
     def count(table: str) -> int:
         return int(conn.execute(f"SELECT COUNT(*) c FROM {table}").fetchone()["c"])
 
-    return {t: count(t) for t in ("sources", "articles", "events", "briefs", "runs")}
+    return {t: count(t) for t in
+            ("sources", "articles", "events", "briefs", "citations", "runs")}

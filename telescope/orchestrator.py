@@ -1,5 +1,5 @@
 """Deterministic DAG orchestrator (Factor 8): collect -> dedup -> store ->
-cluster -> score -> screen -> summarize -> render -> publish."""
+cluster -> score -> screen -> summarize -> review -> render -> publish."""
 from __future__ import annotations
 
 import datetime as dt
@@ -9,6 +9,7 @@ from typing import Callable, Optional
 
 from . import storage
 from .agents.llm import get_backend
+from .agents.reviewer import Reviewer
 from .agents.screener import Screener
 from .agents.summarizer import Summarizer
 from .collectors import rss
@@ -59,8 +60,11 @@ def _card_text(card_arts: list[Article],
     ranked = sorted(card_arts,
                     key=lambda a: source_weights.get(a.source_id, 1.0),
                     reverse=True)
-    leads = " ".join(f"{a.title}. {(a.content_text or '')[:400]}".strip()
-                     for a in ranked[:2])
+    parts: list[str] = []
+    for a in ranked[:2]:
+        lead = (a.content_text or "")[:400]
+        parts.append(f"{a.title}. {lead}".strip())
+    leads = " ".join(parts)
     other_titles = " ; ".join(a.title for a in ranked[2:12])
     text = leads if not other_titles else f"{leads} || 其他报道标题: {other_titles}"
     return text[:1600]
@@ -155,8 +159,8 @@ def run_daily(hours: int = 24, top_n: int = 6,
              "severity": ev.severity, "score": ev.score},
             payload_arts,
         )
+        item.event_id = storage.save_event(conn, ev)
         items.append(item)
-        storage.save_event(conn, ev)
         if backend.name != "rule" and item.mode == "rule":
             card = "fallback:rule"
             if summarizer.last_error:
@@ -164,24 +168,44 @@ def run_daily(hours: int = 24, top_n: int = 6,
             storage.record_step(conn, run_id, "summarizer", f"event:{ev.id}",
                                 error_card=card[:250])
 
-    # 7. render + publish
+    # 7. review: deterministic citation/span QC (M1.1)
     articles_by_id = {
-        a.id: {"id": a.id, "title": a.title, "url": a.url, "source_id": a.source_id}
-        for a in window_arts
+        a.id: {"id": a.id, "title": a.title, "url": a.url,
+               "source_id": a.source_id, "text": a.content_text}
+        for a in window_arts if a.id is not None
     }
+    reviewer = Reviewer()
+    items, review_report = reviewer.review(items, articles_by_id)
+    review_digest = {k: v for k, v in review_report.items() if k != "issues"}
+    storage.record_step(
+        conn, run_id, "reviewer", f"items:{len(items)}",
+        output_ref=json.dumps(review_digest, ensure_ascii=False)[:500],
+        error_card=(json.dumps(review_report["issues"][:10], ensure_ascii=False)[:500]
+                    if review_report["issues"] else ""),
+    )
+
+    # 8. render + publish (+ persist verified citations)
     llm_count = sum(1 for it in items if it.mode == backend.name and backend.name != "rule")
     meta = {"generated_at": now.isoformat(timespec="seconds"),
             "backend": backend.name, "articles": len(window_arts),
             "events": len(events), "sources": len({a.source_id for a in window_arts}),
-            "llm_count": llm_count, "item_count": len(items)}
+            "llm_count": llm_count, "item_count": len(items),
+            "quotes_kept": review_report["quotes_kept"],
+            "quotes_total": review_report["quotes_total"],
+            "low_confidence": review_report["low_confidence"]}
     body = render_daily(date, items, articles_by_id, source_names, meta)
     out_path = brief_dir / f"{date}.md"
     out_path.write_text(body, encoding="utf-8")
-    storage.save_brief(conn, date, "daily", f"TeleScope 每日简报 {date}", body)
+    brief_id = storage.save_brief(conn, date, "daily", f"TeleScope 每日简报 {date}", body)
+    citation_count = storage.save_citations(conn, brief_id, items, articles_by_id)
     storage.finish_run(conn, run_id, "done", {
         "fetched": len(raw), "stored": len(stored), "duplicates": dup_count,
         "events": len(events), "brief": str(out_path), "errors": len(errors),
         "llm_items": llm_count, "total_items": len(items),
+        "quotes_kept": review_report["quotes_kept"],
+        "quotes_total": review_report["quotes_total"],
+        "low_confidence_items": review_report["low_confidence"],
+        "citations": citation_count,
     })
     conn.close()
     return out_path
