@@ -16,9 +16,13 @@ TeleScope 从国内外公开新闻渠道持续采集内容，经多语言处理�
 # 无任何第三方依赖（Python >= 3.10）
 python -m telescope run              # 采集→去重→聚类→评分→筛选→摘要→引用校验→事件溯源→简报，输出 briefs/YYYY-MM-DD.md
 python -m telescope fetch            # 仅采集入库
-python -m telescope sources          # 查看源配置
+python -m telescope sources          # 源列表 ｜ add / enable / disable 管理源（写回 sources.yaml）
+python -m telescope sources check    # 逐源健康探测（结果入库 sources.health_json）
 python -m telescope stats            # 查看库内统计
-python -m unittest discover -s tests # 运行离线测试（61 个，2 个 live 默认跳过）
+python -m telescope feedback add --kind event_relation --target 5 --rating reject --note "误关联"
+                                     # 人机反馈：confirm/reject 直接回写谱系复核状态
+python -m telescope schedule install # 注册 Windows 每日 07:00 计划任务（remove/show 同入口）
+python -m unittest discover -s tests # 运行离线测试（68 个，2 个 live 默认跳过）
 ```
 
 ### 启用 LLM（可选，已实测 MiniMax）

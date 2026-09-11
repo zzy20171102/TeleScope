@@ -47,6 +47,11 @@ CREATE TABLE IF NOT EXISTS event_relations(
   prior_event_id INTEGER, target_event_id INTEGER, type TEXT,
   narrative TEXT, evidence TEXT, confidence REAL, status TEXT, created_at TEXT);
 CREATE INDEX IF NOT EXISTS idx_relations_target ON event_relations(target_event_id);
+CREATE TABLE IF NOT EXISTS feedback(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT, target_id INTEGER, ref TEXT, rating TEXT, note TEXT,
+  created_at TEXT);
+CREATE INDEX IF NOT EXISTS idx_feedback_kind ON feedback(kind);
 CREATE TABLE IF NOT EXISTS runs(
   id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, trigger TEXT,
   status TEXT, created_at TEXT, checkpoint TEXT);
@@ -217,6 +222,44 @@ def save_event_relations(conn: sqlite3.Connection, relations) -> int:
     return len(rows)
 
 
+def update_source_health(conn: sqlite3.Connection, source_id: str,
+                         health: dict[str, Any]) -> None:
+    conn.execute("UPDATE sources SET health_json=? WHERE id=?",
+                 (json.dumps(health, ensure_ascii=False), source_id))
+    conn.commit()
+
+
+def save_feedback(conn: sqlite3.Connection, kind: str, target_id: int,
+                  rating: str, note: str = "", ref: str = "") -> int:
+    """Human feedback row (Factor 7); kinds: brief_item/event_relation/source."""
+    cur = conn.execute(
+        "INSERT INTO feedback(kind,target_id,ref,rating,note,created_at)"
+        " VALUES(?,?,?,?,?,?)",
+        (kind, target_id, ref, rating, note, _now()),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def list_feedback(conn: sqlite3.Connection, kind: Optional[str] = None,
+                  limit: int = 50) -> list[sqlite3.Row]:
+    if kind:
+        return conn.execute(
+            "SELECT * FROM feedback WHERE kind=? ORDER BY id DESC LIMIT ?",
+            (kind, limit)).fetchall()
+    return conn.execute(
+        "SELECT * FROM feedback ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+
+
+def set_relation_status(conn: sqlite3.Connection, relation_id: int,
+                        status: str) -> bool:
+    """Close the F2 review loop: confirm/reject a lineage edge."""
+    cur = conn.execute("UPDATE event_relations SET status=? WHERE id=?",
+                       (status, relation_id))
+    conn.commit()
+    return cur.rowcount > 0
+
+
 def start_run(conn: sqlite3.Connection, kind: str, trigger: str) -> int:
     cur = conn.execute(
         "INSERT INTO runs(kind,trigger,status,created_at,checkpoint) VALUES(?,?,?,?,?)",
@@ -248,4 +291,4 @@ def stats(conn: sqlite3.Connection) -> dict[str, Any]:
 
     return {t: count(t) for t in
             ("sources", "articles", "events", "briefs", "citations",
-             "event_relations", "runs")}
+             "event_relations", "feedback", "runs")}

@@ -52,3 +52,45 @@ def load_sources(path: "Path | None" = None, enabled_only: bool = False) -> list
 
 def load_prompt(name: str) -> str:
     return (PROMPTS_DIR / f"{name}.md.j2").read_text(encoding="utf-8")
+
+
+_SOURCE_FIELDS = ("id", "name", "url", "type", "language", "region",
+                  "perspective", "weight", "fetch_interval_minutes", "enabled")
+_SPECIAL = set(":#{}[]&,*?|") | {chr(34), chr(39), chr(10), chr(13)}
+
+
+def _yaml_scalar(v: Any) -> str:
+    import json
+
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    s = str(v)
+    if not s or s != s.strip() or any(ch in _SPECIAL for ch in s):
+        return json.dumps(s, ensure_ascii=False)
+    return s
+
+
+def save_sources(sources: list[Source], path: "Path | None" = None) -> None:
+    """Write sources back to YAML (single source of truth for source CRUD).
+
+    Regenerates the file in canonical schema order; hand-written comments are
+    replaced by the standard header.
+    """
+    p = path or SOURCES_PATH
+    lines = [
+        "# TeleScope 新闻源配置（单一事实来源）",
+        "# 字段: id/name/url/type/language/region/perspective/weight/"
+        "fetch_interval_minutes/enabled",
+        "# perspective 说明: wire=通讯社 state-media=国家媒体(线索用,权重调低) "
+        "多极视角显式标注",
+        "",
+        "sources:",
+    ]
+    for s in sources:
+        first = True
+        for k in _SOURCE_FIELDS:
+            prefix = "  - " if first else "    "
+            lines.append(f"{prefix}{k}: {_yaml_scalar(getattr(s, k))}")
+            first = False
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")

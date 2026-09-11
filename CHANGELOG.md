@@ -2,6 +2,19 @@
 
 格式参考 Keep a Changelog；版本号遵循语义化版本。
 
+## [0.7.0] - 2026-09-11
+
+### Added — M1/T2.3~T2.5 源管理 / 人机反馈 / 定时运行（M1 收官）
+
+- **源管理 CLI**：`telescope sources add|enable|disable|list` 直接读写 `config/sources.yaml`（新增 `config.save_sources` 规范化写回，保持"单一事实来源"铁律；重复 id 拒绝、未知 id 报错）；`telescope sources check [--all] [--timeout N]` 逐源探测 RSS 可用性，结果（ok/items 或压缩错误）写入 `sources.health_json`，失败源退出码 1。
+- **人机反馈回流（Factor 7）**：`feedback` 表（kind ∈ brief_item/event_relation/source, target_id, ref, rating, note）+ `telescope feedback add|list`；对 `event_relation` 的 `confirm/reject` 即时回写 `event_relations.status = confirmed/rejected`，把 F2 置信度 <0.7 的"待复核"队列交给人工闭环。
+- **Windows 定时运行（Factor 11）**：`telescope/schedule.py` + `telescope schedule install|remove|show [--time 07:00]`；install 生成机器相关的 `scripts/daily_task.bat`（绝对 python 路径、项目 cwd、日志追加至 `data/daily_run.log`，bat 已 gitignore）并注册 schtasks 每日任务；命令构造与 bat 生成纯函数化，离线可测。
+- `storage.update_source_health / save_feedback / list_feedback / set_relation_status`；stats 新增 feedback 计数。
+
+### Verified
+
+- 离线测试 68 个全绿（61→68，无网）；CLI 冒烟：`--help`/`stats`/`schedule show`（正确报未安装）、sources yaml 增改启停 roundtrip、mock 抓取健康检查（成功/失败两路）、feedback 落库与关系状态回写。
+
 ## [0.6.0] - 2026-09-11
 
 ### Added — M1/T2.2 F2 事件溯源引擎（DESIGN 4.3 四阶段流水线）

@@ -63,5 +63,6 @@ analyses / briefs / citations；runs + steps = 执行审计。
 - [x] M0.5 LLM 接入：MiniMax 实测通过，真实简报落盘（805 文章/157 事件/Top6）
 - [x] P0 质量快修：聚类防漂移/关键词边界/降级透明化/JSON 三层防御 — 2026-09-01
 - [x] M1/T2.1 引用校验 + Reviewer：span 校验/citations 表/引文锚点/低置信降级 — 2026-09-11
-- [x] M1/T2.2 F2 事件溯源引擎：混合召回/EventTracer/event_relations 表/时间线+Mermaid 谱系 — 2026-09-11（61 离线测试全绿）
-- [ ] M1（剩余）：源管理 CLI → 人机反馈 → 定时运行
+- [x] M1/T2.2 F2 事件溯源引擎：混合召回/EventTracer/event_relations 表/时间线+Mermaid 谱系 — 2026-09-11
+- [x] M1/T2.3-T2.5 源管理 CLI（yaml 写回+健康探测）/ feedback 表+关系状态回流 / schedule 定时任务 — 2026-09-11，**M1 收官**（68 离线测试全绿）
+- [ ] M2：周/月报 Analyzer、GDELT/ACLED、pgvector、Web UI
